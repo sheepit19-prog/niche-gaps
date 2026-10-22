@@ -58,14 +58,14 @@ Grouping: generic English keyword hints (no LLM). 47% of reviews matched no them
 
 ### 6. other: can't / not working (catch-all)
 
-> "Use to love this app but the reciept scanner has been complete garbage the last few months. Making me rethink the renewal coming up oct 27th. Also have no clue..."  
-> Receipt Scanner: Easy Expense, 3 stars, 2026-10-16
+> "cant cancel subscription"  
+> Receipt Scanner: Easy Expense, 3 stars, v5.79.0, 2026-10-08
 
 > "can't get past sign in code"  
 > SimplyWise: Receipts, Expenses, 1 star, v0.83.0, 2026-09-21
 
-> "used to be great, until a complete remodeling of the interface. suddenly can't easily jump to a specific month anymore to check income/expenses. Sending a..."  
-> SparkReceipt: Receipt Scanner, 2 stars, v2.3.4, 2026-08-18
+> "does everything except what it says it does. not free. also can't delete account unless they send you a code...."  
+> Dext: Receipt Tracker, 1 star, 2026-06-04
 
 
 ## Apps sampled

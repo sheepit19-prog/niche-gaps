@@ -24,6 +24,7 @@ LLM_MODEL = "claude-haiku-5-5"
 # ponytail: list prices for prompts under 100K tokens; Haiku 5.5 bills more above that.
 PRICE_IN, PRICE_OUT = 0.10 / 1e6, 0.50 / 1e6
 QUOTES_PER_THEME = 3
+QUOTE_CHARS = 160
 # "can't / not working" matches almost every complaint; shown last so it can't outrank real themes.
 CATCH_ALL = "missing/broken function"
 
@@ -33,6 +34,7 @@ Group the concrete complaints into themes.
 - A theme is one specific problem a competing app could fix, e.g. "CSV export locked behind subscription", not "bad app".
 - Add a review id to every theme it clearly supports. Skip reviews with no concrete complaint (vague, praise, off-topic).
 - At most 15 themes. Labels under 8 words. Description: one sentence on what users report.
+- No numbers, prices or counts in labels or descriptions; the report computes and quotes those itself.
 
 Reviews (id: stars: text):
 {reviews}"""
@@ -127,7 +129,9 @@ def rank(themes, data):
         hits = [lookup[ref] for ref in dict.fromkeys(t["refs"]) if ref in lookup]
         if not hits:
             continue
+        # Quotes: reviews short enough to show in full come first, so a reader can check the theme.
         hits.sort(key=lambda ar: ar[1]["at"], reverse=True)
+        hits.sort(key=lambda ar: len(" ".join(ar[1]["text"].split())) > QUOTE_CHARS)
         quotes, quoted_apps = [], set()
         for a, r in hits:
             if a["appId"] not in quoted_apps and len(quotes) < QUOTES_PER_THEME:
@@ -138,7 +142,7 @@ def rank(themes, data):
     return ranked
 
 
-def short(text, limit=160):
+def short(text, limit=QUOTE_CHARS):
     text = " ".join(text.split())
     return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "..."
 

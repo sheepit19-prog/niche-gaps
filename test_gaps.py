@@ -51,6 +51,15 @@ class GapsTests(unittest.TestCase):
         # one quote per app, newest first
         self.assertEqual([r["ref"] for _, r in ranked[0]["quotes"]], ["r1", "r4"])
 
+    def test_quotes_prefer_reviews_shown_in_full(self):
+        data = sample()
+        data["apps"][0]["reviews"].append(review("r5", "Export fails " + "very " * 40, "2026-10-20T00:00:00+00:00"))
+        ranked = gaps.rank([{"label": "export", "description": "", "refs": ["r5", "r1"]}], data)
+        self.assertEqual([r["ref"] for _, r in ranked[0]["quotes"]], ["r1"])
+
+    def test_llm_prompt_forbids_model_written_numbers(self):
+        self.assertIn("No numbers, prices or counts", gaps.LLM_PROMPT)
+
     def test_more_apps_outranks_more_reviews_and_catch_all_goes_last(self):
         themes = [{"label": "one app, many reviews", "description": "", "refs": ["r1", "r2", "r3"]},
                   {"label": "catch-all", "description": "", "refs": ["r1", "r4"], "catch_all": True},
