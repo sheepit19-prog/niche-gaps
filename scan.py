@@ -84,7 +84,7 @@ _PRICE_PATTERN = re.compile(
 _PROBLEM_PATTERNS = {
     "crash/startup": r"\b(crash\w*|won'?t open|can'?t open|unable to open|not opening)\b",
     "sync/data loss": r"\b(sync\w*|lost data|data loss|disappear\w*|keeps disconnecting)\b",
-    "export": r"\b(export\w*|download\w*)\b",
+    "export": r"\b(export\w*|csv)\b",
     "login/account": r"\b(log ?in|sign ?in|password|logs? out|reset password)\b",
     "notifications": r"\b(notification\w*|reminders?|alerts?)\b",
     "battery/performance": r"\b(battery|overheat\w*|slow|freez\w*)\b",
