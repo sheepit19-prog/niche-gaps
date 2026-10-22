@@ -47,7 +47,7 @@ Grouping has two modes:
 ## Design decisions
 
 - **The classifier never counts.** Keyword rules or Claude only assign review ids to themes. App counts, review counts and quotes are computed in code from those ids; ids that don't exist are dropped. A model can't inflate a number in the report.
-- **Model text is a summary, quotes are the evidence.** Claude writes theme labels and one-line descriptions and is told to leave numbers out of them. In testing a description once invented a price range and once flipped what a review said, so every theme shows real quotes, preferring reviews short enough to read in full.
+- **Theme labels and descriptions are written by Claude and can be wrong;** the quotes under each theme are the evidence.
 - **LLM themes vary between runs.** Exact labels and the long tail change; check what stays across runs before trusting a theme.
 - **Unmatched reviews are reported, not hidden.** The header says what share of reviews fit no theme.
 - **The catch-all goes last.** "can't / not working" matches nearly every complaint, so it is shown but never ranked above a real theme.
