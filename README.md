@@ -11,7 +11,7 @@ One app with a bug is noise. The same complaint across most of a category is a g
 `python gaps.py "receipt scanner" --exclude "rewards,cash for receipts,earn"` ([full report](examples/receipt-scanner.md)):
 
 ```
-8 apps, 76 reviews (1-3 stars, last 180 days). Keyword grouping: 46% of reviews matched no theme.
+8 apps, 76 reviews (1-3 stars, last 180 days). Keyword grouping: 47% of reviews matched no theme.
 
 | # | Theme               | Apps | Reviews |
 |---|---------------------|------|---------|
