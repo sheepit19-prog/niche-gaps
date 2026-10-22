@@ -8,22 +8,27 @@ One app with a bug is noise. The same complaint across most of a category is a g
 
 ## Example
 
-`python gaps.py "receipt scanner" --exclude "rewards,cash for receipts,earn"` ([full report](examples/receipt-scanner.md)):
+`python gaps.py "receipt scanner" --exclude "rewards,cash for receipts,earn"`, then the same 76 reviews regrouped with `--input <saved json> --llm`.
+
+**With Claude** ([full report](examples/receipt-scanner-llm.md)):
 
 ```
-8 apps, 76 reviews (1-3 stars, last 180 days). Keyword grouping: 47% of reviews matched no theme.
+8 apps, 76 reviews (1-3 stars, last 180 days). 22% of reviews matched no theme. About $0.003.
 
-| # | Theme               | Apps | Reviews |
-|---|---------------------|------|---------|
-| 1 | price/ads           | 5/8  | 24      |
-| 2 | battery/performance | 2/8  | 4       |
-| 3 | login/account       | 2/8  | 3       |
-
-> "Its a subscription app. Big no."
-> Receipt Scanner: Easy Expense, 1 star, 2026-10-17
+| # | Theme                                      | Apps | Reviews |
+|---|--------------------------------------------|------|---------|
+| 1 | App freezes, crashes, or lags              | 4/8  | 8       |
+| 2 | Confusing, frequently redesigned interface | 4/8  | 8       |
+| 3 | Mandatory account signup before any use    | 4/8  | 7       |
+| 4 | Unresponsive support, only AI bot          | 4/8  | 6       |
+| 5 | Cannot cancel subscription                 | 4/8  | 4       |
+| 6 | Subscription price seen as excessive       | 3/8  | 5       |
+| 7 | Scanned amounts, tax and dates misread     | 3/8  | 5       |
 ```
 
-Reading it: 7 of the 8 apps are rated 4.3 or higher and few negative reviews come in. The complaint most apps share is not a missing feature, it is pushback on subscriptions and pricing. With 76 reviews that is a lead to check, not a conclusion, and a quiet niche is a result too.
+**With keywords** ([full report](examples/receipt-scanner.md)): 47% of reviews matched no theme, and the top theme was a generic `price/ads` (5/8 apps). Claude split that into cancellation, price and paywall complaints and found themes keywords can't name, like misread tax lines.
+
+Reading it: 7 of the 8 apps are rated 4.3 or higher and few negative reviews come in, so every theme here rests on a handful of reviews. Across two Claude runs the same four themes reached 4 of 8 apps: crashes, forced signup, unreachable support and subscriptions that can't be cancelled. That is a lead to check, not a conclusion.
 
 ## How it works
 
@@ -36,12 +41,14 @@ Grouping has two modes:
 | | Keywords (default) | `--llm` |
 |---|---|---|
 | Needs | nothing | your own `ANTHROPIC_API_KEY` |
-| Themes | generic: price, export, crash, login, sync... | niche-specific, e.g. "OCR misreads faded receipts" |
-| Cost | free | a few cents per report (Claude Haiku; tokens and cost printed in the report) |
+| Themes | generic: price, export, crash, login, sync... | niche-specific, e.g. "Scanned amounts, tax and dates misread" |
+| Cost | free | under a cent for the example above (Claude Haiku; tokens and cost printed in the report) |
 
 ## Design decisions
 
 - **The classifier never counts.** Keyword rules or Claude only assign review ids to themes. App counts, review counts and quotes are computed in code from those ids; ids that don't exist are dropped. A model can't inflate a number in the report.
+- **Model text is a summary, quotes are the evidence.** Claude writes theme labels and one-line descriptions and is told to leave numbers out of them. In testing a description once invented a price range and once flipped what a review said, so every theme shows real quotes, preferring reviews short enough to read in full.
+- **LLM themes vary between runs.** Exact labels and the long tail change; check what stays across runs before trusting a theme.
 - **Unmatched reviews are reported, not hidden.** The header says what share of reviews fit no theme.
 - **The catch-all goes last.** "can't / not working" matches nearly every complaint, so it is shown but never ranked above a real theme.
 - **Every report states what it is not.** Reviews are user claims, the sample is not all users, an in-app purchase listing is not proof anyone pays.
