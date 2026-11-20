@@ -5,6 +5,7 @@ Usage:
     python gaps.py "receipt scanner"                        # keyword themes, no API key
     python gaps.py "receipt scanner" --exclude rewards      # drop off-niche apps
     python gaps.py "receipt scanner" --llm                  # Claude groups complaints
+    python gaps.py "receipt scanner" --store both           # Google Play and App Store
     python gaps.py --input results/receipt-scanner_X.json --llm   # regroup saved reviews
 
 Output:
@@ -18,6 +19,7 @@ import os
 import re
 from datetime import datetime, timezone
 
+import ios
 import scan
 
 LLM_MODEL = "claude-haiku-5-5"
@@ -28,7 +30,7 @@ QUOTE_CHARS = 160
 # "can't / not working" matches almost every complaint; shown last so it can't outrank real themes.
 CATCH_ALL = "missing/broken function"
 
-LLM_PROMPT = """These are recent 1-3 star Google Play reviews of apps in the "{niche}" category.
+LLM_PROMPT = """These are recent 1-3 star app store reviews of apps in the "{niche}" category.
 Group the concrete complaints into themes.
 
 - A theme is one specific problem a competing app could fix, e.g. "CSV export locked behind subscription", not "bad app".
@@ -40,36 +42,78 @@ Reviews (id: stars: text):
 {reviews}"""
 
 
-def top_apps(term, n, min_installs=10_000, exclude=(), hits=60):
-    """Apps in Google's own result order, so the sample matches what a searcher sees."""
-    found = scan.search(term, lang=scan.CONFIG["lang"], country=scan.CONFIG["country"], n_hits=hits)
+def top_apps(term, n, min_installs=10_000, exclude=(), hits=60, store="play",
+             min_ratings=500, countries=ios.COUNTRIES):
+    """Apps in the store's own result order, so the sample matches what a searcher sees."""
     excluded = [e.lower() for e in exclude]
-    picked = []
-    for a in found:
-        name = f"{a.get('appId', '')} {a.get('title', '')}".lower()
-        if not a.get("appId") or any(e in name for e in excluded):
-            continue
-        if scan.parse_installs(a.get("installs")) < min_installs:
-            continue
-        picked.append({"appId": a["appId"], "title": str(a.get("title", "")),
-                       "score": a.get("score"), "installs": str(a.get("installs", ""))})
-    return picked[:n]
+    if store == "ios":
+        # Apple publishes no installs; the rating count is the size filter instead.
+        found = [a for a in ios.search(term, country=countries[0], n_hits=hits) if a["ratings"] >= min_ratings]
+    else:
+        found = [{"appId": a["appId"], "store": "play", "title": str(a.get("title", "")),
+                  "developer": str(a.get("developer", "")), "score": a.get("score"),
+                  "installs": str(a.get("installs", ""))}
+                 for a in scan.search(term, lang=scan.CONFIG["lang"], country=scan.CONFIG["country"], n_hits=hits)
+                 if a.get("appId") and scan.parse_installs(a.get("installs")) >= min_installs]
+    return [a for a in found if not any(e in f"{a['appId']} {a['title']}".lower() for e in excluded)][:n]
 
 
-def collect(term, n_apps, per_app, days, min_installs, exclude):
-    apps = top_apps(term, n_apps, min_installs, exclude)
+_COMPANY_WORDS = re.compile(r"\b(inc|llc|ltd|limited|gmbh|corp|co|company|pty|bv|srl|ab)\b")
+
+
+def same_product(a, b):
+    """True only when both the title before any subtitle and the developer name agree."""
+    def key(text):
+        return re.sub(r"[^a-z0-9]+", "", text)
+    title_a, title_b = (key(re.split(r"[:\-–|(]", x["title"].lower())[0]) for x in (a, b))
+    dev_a, dev_b = (key(_COMPANY_WORDS.sub("", x.get("developer", "").lower())) for x in (a, b))
+    return (bool(title_a) and title_a == title_b and min(len(dev_a), len(dev_b)) >= 3
+            and (dev_a.startswith(dev_b) or dev_b.startswith(dev_a)))
+
+
+def merge_stores(play_apps, ios_apps):
+    """A product listed on both stores counts once. Unsure matches stay separate."""
+    left = list(ios_apps)
+    merged = []
+    for p in play_apps:
+        twin = next((i for i in left if same_product(p, i)), None)
+        if twin:
+            left.remove(twin)
+            # The App Store listing is kept on the record so a wrong match can be spotted in the JSON.
+            p = {**p, "store": "both", "ios_id": twin["ios_id"], "ratings": twin["ratings"],
+                 "ios_title": twin["title"], "ios_developer": twin.get("developer", "")}
+        merged.append(p)
+    return merged + left
+
+
+def collect(term, n_apps, per_app, days, min_installs, exclude, store="play",
+            min_ratings=500, countries=ios.COUNTRIES):
+    def pick(s):
+        return top_apps(term, n_apps, min_installs, exclude, store=s, min_ratings=min_ratings, countries=countries)
+    apps = merge_stores(pick("play"), pick("ios")) if store == "both" else pick(store)
     ref = 0
+    ios_up = not any(a.get("ios_id") for a in apps) or ios.feed_is_up()
+    if not ios_up:
+        print("  App Store review feed is down (probe app returned no reviews): skipping App Store reviews.")
     for i, a in enumerate(apps, 1):
-        a.update(scan.get_app_details(a["appId"]))
-        a["reviews"], a["review_errors"] = scan.get_reviews(a["appId"], per_app, days)
+        a["reviews"], a["review_errors"] = [], []
+        if a["store"] != "ios":
+            a.update(scan.get_app_details(a["appId"]))
+            a["reviews"], a["review_errors"] = scan.get_reviews(a["appId"], per_app, days)
+        if a.get("ios_id") and not ios_up:
+            a["review_errors"].append("App Store review feed was down, reviews not fetched")
+        elif a.get("ios_id"):
+            reviews, errors = ios.get_reviews(a["ios_id"], per_app, days, countries)
+            a["reviews"] += reviews
+            a["review_errors"] += errors
         for r in a["reviews"]:
             ref += 1
             r["ref"] = f"r{ref}"
         print(f"  {i}. {a['title'][:40]}: {len(a['reviews'])} reviews")
     return {"niche": term, "observed_at": datetime.now(timezone.utc).isoformat(),
-            "review_days": days, "reviews_per_app": per_app,
+            "review_days": days, "reviews_per_app": per_app, "store": store,
             "locale": {"lang": scan.CONFIG["lang"], "country": scan.CONFIG["country"]},
-            "apps": apps}
+            "ios_countries": list(countries), "apps": apps}
 
 
 def all_reviews(data):
@@ -152,7 +196,15 @@ def money_label(a):
         return f"paid {a.get('currency') or ''} {a['price']}".strip()
     if a.get("offersIAP"):
         return f"IAP {a.get('iap_price') or ''}".strip()
+    if a.get("store") == "ios" and a.get("free"):
+        return "free to download (IAP not listed)"
     return "free" if a.get("free") else "unknown"
+
+
+def store_label(data):
+    play = f"Google Play ({data['locale']['lang']}/{data['locale']['country']})"
+    app_store = f"the App Store ({', '.join(data.get('ios_countries', []))})"
+    return {"play": play, "ios": app_store, "both": f"{play} and {app_store}"}[data.get("store", "play")]
 
 
 def report(data, ranked, method):
@@ -169,9 +221,15 @@ def report(data, ranked, method):
     lines = [
         f"# Niche gap report: {data['niche']}",
         "",
-        f"Observed {data['observed_at'][:10]} on Google Play ({data['locale']['lang']}/{data['locale']['country']}). "
+        f"Observed {data['observed_at'][:10]} on {store_label(data)}. "
         f"{n_apps} apps, {len(reviews)} reviews (1-3 stars, last {data['review_days']} days).",
         f"Grouping: {how}. {share:.0f}% of reviews matched no theme.",
+    ]
+    if data.get("store") == "both":
+        both = sum(1 for a in data["apps"] if a.get("store") == "both")
+        lines.append(f"{both} of {n_apps} apps were matched across both stores by title and developer and count once. "
+                     "The rest are counted per store, so a product whose two listings differ may appear twice.")
+    lines += [
         "",
         "## Themes, ranked by how many apps share them",
         "",
@@ -187,13 +245,16 @@ def report(data, ranked, method):
         for a, r in t["quotes"]:
             source = [a["title"], f"{r['score']} star" + ("" if r["score"] == 1 else "s")]
             source += [f"v{r['version']}"] if r.get("version") else []
+            source += [f"App Store {r['country']}"] if r.get("store") == "ios" else []
             lines += [f"> \"{short(r['text'])}\"  ", f"> {', '.join(source + [r['at'][:10]])}", ""]
     lines += ["", "## Apps sampled", "",
-              "| App | Rating | Installs | Monetization | Reviews |",
-              "|-----|--------|----------|--------------|---------|"]
+              "| App | Store | Rating | Size | Monetization | Reviews |",
+              "|-----|-------|--------|------|--------------|---------|"]
     for a in data["apps"]:
         score = f"{a['score']:.1f}" if a.get("score") else "?"
-        lines.append(f"| {scan.md_cell(a['title'])} | {score} | {a['installs']} | "
+        size = " / ".join(filter(None, [a.get("installs") and f"{a['installs']} installs",
+                                        a.get("ratings") and f"{scan.fmt(a['ratings'])} iOS ratings"]))
+        lines.append(f"| {scan.md_cell(a['title'])} | {a.get('store', 'play')} | {score} | {size or '?'} | "
                      f"{scan.md_cell(money_label(a))} | {len(a['reviews'])} |")
     lines += ["", "## What this is not", "",
               "- Reviews are user claims. The sample is the newest reviews per star level, not all users.",
@@ -207,7 +268,11 @@ def report(data, ranked, method):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Rank the complaints an app niche shares on Google Play.")
+    p = argparse.ArgumentParser(description="Rank the complaints an app niche shares on Google Play or the App Store.")
+    p.add_argument("--store", choices=["play", "ios", "both"], default="play", help="Review source (default: play)")
+    p.add_argument("--min-ratings", type=int, default=500, help="App Store: skip apps with fewer ratings (default: 500)")
+    p.add_argument("--countries", default=",".join(ios.COUNTRIES),
+                   help="App Store: storefronts to merge reviews from (default: us,gb,ca,au)")
     p.add_argument("niche", nargs="?", help='Search term, e.g. "receipt scanner"')
     p.add_argument("--apps", type=int, default=12, help="Apps to sample (default: 12)")
     p.add_argument("--reviews", type=int, default=60, help="Reviews per app, balanced 1/2/3 stars (default: 60)")
@@ -231,9 +296,11 @@ def main():
     else:
         print(f"Sampling {args.apps} apps for {args.niche!r}...")
         exclude = [e.strip() for e in args.exclude.split(",") if e.strip()]
-        data = collect(args.niche, args.apps, args.reviews, args.review_days, args.min_installs, exclude)
+        countries = [c.strip().lower() for c in args.countries.split(",") if c.strip()] or list(ios.COUNTRIES)
+        data = collect(args.niche, args.apps, args.reviews, args.review_days, args.min_installs, exclude,
+                       args.store, args.min_ratings, countries)
         if not data["apps"]:
-            print("No apps matched. Lower --min-installs or check --exclude.")
+            print("No apps matched. Lower --min-installs or --min-ratings, or check --exclude.")
             return
         slug = re.sub(r"[^a-z0-9]+", "-", args.niche.lower()).strip("-")
         base = os.path.join(args.output, f"{slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
